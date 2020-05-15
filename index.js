@@ -125,6 +125,6 @@ io.on('connection', (socket) => {
     });
   });
 
-http.listen(3001, () => {
-  console.log('listening on *:3001');
+http.listen(4000, '0.0.0.0', () => {
+  console.log('listening on *:4000');
 });

@@ -1,11 +1,11 @@
 FROM node:13.6.0 as build-deps
 WORKDIR /usr/src/app
+ENV PATH /usr/src/app/node_modules/.bin:$PATH
 COPY package.json .
 RUN npm install
 COPY . ./
-RUN npm run build
 
 FROM nginx:alpine
-COPY --from=build-deps /usr/src/app/build /usr/share/nginx/html
-EXPOSE 80
+COPY --from=build-deps /usr/src/app/ /usr/share/nginx/html
+EXPOSE 90
 CMD ["nginx", "-g", "daemon off;"]
