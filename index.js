@@ -8,6 +8,7 @@ app.get('/', (req, res) => {
 
 const users = {};
 const rooms = {};
+const roomUsers = {};
 const roles = ['mafia', 'villager', 'villager', 'mafia', 'villager', 'villager']
 
 const shuffleArray = (array) => {
@@ -24,58 +25,86 @@ io.on('connection', (socket) => {
     let room;
     let user;
 
-    socket.on('login', ({ userName, roomName }) => {
-      users[id] = userName;
+    socket.on('login', ({ name, roomName }) => {
+      console.log('login: ', name );
+      users[id] = name;
       room = roomName;
       user = {
-        name: userName,
+        name,
         role: '',
-        alive: true
+        alive: true,
+        id
       };
 
       socket.join(roomName);
 
-      if (rooms[room]) {
-        rooms[room].users = [...rooms[roomName].users, user];
+      if (rooms[room] && roomUsers[room]) {
+        roomUsers[room].push(user);
       } else {
         rooms[room] = {
           name: room,
-          users: [user],
           dayCount: 0,
-          actions: { mafia: {} },
-          actionCount: 0,
-          expectedActions: 0,
-        }
+          hidden: {
+            roles: [],
+            actions: { mafia: {} },
+            actionCount: 0,
+            expectedActions: 0,
+          }
+        };
+        roomUsers[room] = [user];
       }
 
-      io.to(roomName).emit('room_status', rooms[room]);
+      const roomStatus = { ...rooms[room], hidden: {} };
+      io.to(room).emit('room_status', roomStatus);
+      io.to(room).emit('room_users', roomUsers[room]);
     });
 
     socket.on('leave_room', () => {
       socket.leave(room);
-      if (rooms[room]) {
-        rooms[room].users = rooms[room].users.filter(us => us.name !== user.name);
+      if (roomUsers[room]) {
+        roomUsers[room] = roomUsers[room].filter(us => us.name !== user.name);
       }
-      io.to(room).emit('room_status', rooms[room]);
+      io.to(room).emit('room_users', roomUsers[room]);
     });
+
+
 
     socket.on('start_game', () => {
-      const gameRoles = shuffleArray(roles.slice(0, (rooms[room].users.length)));
-      console.log(gameRoles);
+      console.log('start_game in room ', room.name);
+      const gameRoles = shuffleArray(roles.slice(0, (roomUsers[room].length)));
+      const mafiaUsers = []
+
+      // Assign roles, send roles to non-mafia, create mafia array
       gameRoles.forEach((gameRole, ix) => {
-        rooms[room].users[ix].role = gameRole;
+        const socketId = roomUsers[room][ix].id;
+        rooms[room].hidden.roles[ix] = [gameRole];
         if (gameRole !== 'villager') {
           rooms[room].expectedActions ++
+        } 
+        if (gameRole !== 'mafia') {
+          io.to(socketId).emit('room_users', [{ name: roomUsers[room][ix].name, role: gameRole }]);
+        } else {
+          mafiaUsers.push({ name: roomUsers[room][ix].name, role: gameRole })
         }
       });
+
+      // Send all mafia users to all mafia
+      gameRoles.forEach((gameRole, ix) => {
+        const socketId = roomUsers[room][ix].id;
+        if (gameRole === 'mafia') {
+          io.to(socketId).emit('room_users', mafiaUsers);
+        }
+      });
+
       rooms[room].dayCount = 1;
       rooms[room].nightTime = true
-      io.to(room).emit('room_status', rooms[room]);
-      user = rooms[room].users.find(us => us.name === user.name);
+      const roomStatus = { ...rooms[room], hidden: {} };
+      io.to(room).emit('room_status', roomStatus);
     });
 
+
     socket.on('action', (target) => {
-      const actions = { ...rooms[room].actions };
+      const actions = { ...rooms[room].hidden.actions };
       rooms[room].actionCount++;
 
       if (user.role === 'mafia') {
@@ -92,9 +121,9 @@ io.on('connection', (socket) => {
       if (rooms[room].actionCount === rooms[room].expectedActions) {
         let killUser = undefined;
         let message = ''
-        Object.keys(actions.mafia).forEach(act => {
-          if (!killUser || actions.mafia[act] > actions.mafia[killUser]) {
-            killUser = act;
+        Object.keys(actions.mafia).forEach(trgt => {
+          if (!killUser || actions.mafia[trgt] > actions.mafia[killUser]) {
+            killUser = trgt;
           }
         })
         if (actions.doctor && actions.doctor === killUser) {
@@ -102,11 +131,15 @@ io.on('connection', (socket) => {
           killUser = undefined;
         } else {
           rooms[room].message = `${killUser} was killed by the mafia`;
+          io.to(roomName).emit('room_users', [{ name: killUser, alive: false }]);
+          rooms[room].dayCount++;
+          rooms[room].nightTime = false;
         }
       }
 
-      rooms[room].actions = actions;
-      io.to(room).emit('room_status', rooms[room]);
+      rooms[room].hidden.actions = actions;
+      const roomStatus = { ...rooms[room], hidden: {} };
+      io.to(room).emit('room_status', roomStatus);
     });
 
     socket.on('new_message', (msg) => {
@@ -116,7 +149,7 @@ io.on('connection', (socket) => {
 
     socket.on('disconnect', () => {
       if (rooms[room]) {
-        rooms[room].users = rooms[room].users.filter(us => us !== user);
+        roomUsers[room] = roomUsers[room].filter(us => us !== user);
       }
 
       io.to(room).emit('room_status', rooms[room]);
