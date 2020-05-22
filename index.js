@@ -34,42 +34,48 @@ io.on('connection', (socket) => {
         id
       };
 
-      socket.join(roomName);
+      if (!rooms[room] || rooms[room].dayCount === 0) {
+        socket.join(room);
 
-      if (rooms[room] && roomUsers[room]) {
-        roomUsers[room].push(user);
-      } else {
-        rooms[room] = {
-          name: room,
-          dayCount: 0,
-          nightTime: false,
-          message: '',
-          votes: {},
-          voteCount: 0,
-          aliveCount: 0,
-          hidden: {
-            actions: { mafia: {} },
-            actionCount: 0,
-            mafia: 0,
-            villager: 0,
-            doctor: 0,
-            policeman: 0,
-          }
-        };
-        roomUsers[room] = [user];
+        if (rooms[room]) {
+          roomUsers[room].push(user);
+        } else {
+          rooms[room] = {
+            name: room,
+            dayCount: 0,
+            nightTime: false,
+            message: '',
+            votes: {},
+            voteCount: 0,
+            aliveCount: 0,
+            hidden: {
+              actions: { mafia: {} },
+              actionCount: 0,
+              mafia: 0,
+              villager: 0,
+              doctor: 0,
+              policeman: 0,
+            }
+          };
+          roomUsers[room] = [user];
+        }
+
+        const roomStatus = { ...rooms[room] };
+        io.to(room).emit('room_status', roomStatus);
+        io.to(room).emit('room_users', roomUsers[room]);
       }
-
-      const roomStatus = { ...rooms[room] };
-      io.to(room).emit('room_status', roomStatus);
-      io.to(room).emit('room_users', roomUsers[room]);
     });
 
     socket.on('leave_room', () => {
       socket.leave(room);
       if (roomUsers[room]) {
         roomUsers[room] = roomUsers[room].filter(us => us.name !== user.name);
+        io.to(room).emit('room_users', roomUsers[room]);
+        console.log(roomUsers[room]);
       }
-      io.to(room).emit('room_users', roomUsers[room]);
+      if (!roomUsers[room] || roomUsers[room].length === 0) { 
+        delete rooms[room];
+      }
     });
 
 
@@ -136,7 +142,10 @@ io.on('connection', (socket) => {
               killUser = trgt;
             }
           })
-          if (actions.doctor && actions.doctor === killUser) {
+          if (rooms[room].hidden.mafia > 1 && actions.mafia[killUser] < 2) {
+            killUser = undefined;
+            rooms[room].message = 'Mafia could not agree on who to kill';
+          } else if (actions.doctor && actions.doctor === killUser) {
             rooms[room].message = `${killUser} was saved by the doctor`;
             killUser = undefined;
           } else {
@@ -201,9 +210,11 @@ io.on('connection', (socket) => {
       if (rooms[room]) {
         roomUsers[room] = roomUsers[room].filter(us => us !== user);
       }
-
-      io.to(room).emit('room_status', rooms[room]);
-      io.emit('new_message', `${users[id]} disconnected`);
+      if (!roomUsers[room] || roomUsers[room].length === 0) { 
+        delete rooms[room];
+      } else {
+        io.to(room).emit('room_status', rooms[room]);
+      }
       delete users[id];
     });
   });
