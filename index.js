@@ -9,7 +9,7 @@ app.get('/', (req, res) => {
 const users = {};
 const rooms = {};
 const roomUsers = {};
-const roles = ['mafia', 'villager', 'doctor', 'policeman', 'mafia', 'villager']
+const roles = ['mafia', 'villager', 'doctor', 'policeman', 'mafia', 'villager', 'villager', 'villager', 'mafia', 'villager', 'villager', 'villager', 'mafia', 'villager', 'villager', 'villager', 'mafia']
 
 const shuffleArray = (array) => {
   for (let i = array.length - 1; i > 0; i--) {
@@ -63,6 +63,8 @@ io.on('connection', (socket) => {
         const roomStatus = { ...rooms[room] };
         io.to(room).emit('room_status', roomStatus);
         io.to(room).emit('room_users', roomUsers[room]);
+      } else {
+        io.to(id).emit('error', 'Game started');
       }
     });
 
@@ -71,7 +73,6 @@ io.on('connection', (socket) => {
       if (roomUsers[room]) {
         roomUsers[room] = roomUsers[room].filter(us => us.name !== user.name);
         io.to(room).emit('room_users', roomUsers[room]);
-        console.log(roomUsers[room]);
       }
       if (!roomUsers[room] || roomUsers[room].length === 0) { 
         delete rooms[room];
@@ -81,7 +82,6 @@ io.on('connection', (socket) => {
 
 
     socket.on('start_game', () => {
-      console.log('start_game in room', room);
       const gameRoles = shuffleArray(roles.slice(0, (roomUsers[room].length)));
       const mafiaUsers = []
 
@@ -114,15 +114,13 @@ io.on('connection', (socket) => {
 
 
     socket.on('action', ({ target, role }) => {
-      console.log('action:', user, 'targeted', target)
-
       if (rooms[room].nightTime) {
         const expectedActions = rooms[room].hidden.mafia + rooms[room].hidden.policeman + rooms[room].hidden.doctor;
         const actions = { ...rooms[room].hidden.actions };
         rooms[room].hidden.actionCount++;
 
         if (role === 'mafia') {
-          actions.mafia[target] = actions.mafia[target] ? actions.mafia[target]++ : 1;
+          actions.mafia[target] = actions.mafia[target] ? actions.mafia[target] += 1 : 1;
         } else if (role === 'policeman') {
           const targetFull = roomUsers[room].find(user => user.name === target);
           io.to(id).emit('room_users', [targetFull]);
@@ -130,11 +128,10 @@ io.on('connection', (socket) => {
         } else {
           actions[role] = target;
         }
-
         rooms[room].hidden.actions = actions;
         const roomStatus = { ...rooms[room] };
         io.to(room).emit('room_status', roomStatus);
-  
+        
         if (rooms[room].hidden.actionCount === expectedActions) {
           let killUser = undefined;
           Object.keys(actions.mafia).forEach(trgt => {
