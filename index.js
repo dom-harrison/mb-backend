@@ -70,17 +70,20 @@ io.on('connection', (socket) => {
 
     socket.on('leave_room', () => {
       if (roomUsers[room] && rooms[room]) {
-        roomUsers[room] = roomUsers[room].filter(us => us.name !== user.name);
-        if (rooms[room].dayCount > 0){
-          rooms[room].hidden[user.role]--;
-          rooms[room].aliveCount--;
+        if (rooms[room].dayCount > 0){  
+          if (!user.dead) {
+            user.dead = true;
+            rooms[room].hidden[user.role]--;
+            rooms[room].aliveCount--;
+            io.to(room).emit('room_users', [{ name: user.name, dead: true }]);
+          }
           rooms[room].message = `${user.name} left the game`;
           const roomStatus = { ...rooms[room] };
           io.to(room).emit('room_status', roomStatus);
-          io.to(room).emit('room_users', [{ name: user.name, dead: true }]);
         } else {
           io.to(room).emit('room_users', [{ name: user.name, remove: true }]);
         }
+        roomUsers[room] = roomUsers[room].filter(us => us.name !== user.name);
       }
       socket.leave(room);
       if (!roomUsers[room] || roomUsers[room].length === 0) { 
@@ -155,7 +158,8 @@ io.on('connection', (socket) => {
             rooms[room].message = `${killUser} was saved by the doctor`;
             killUser = undefined;
           } else {
-            const killUserFull = roomUsers[room].find(user => user.name === killUser) || {};
+            const killUserFull = roomUsers[room].find(us => us.name === killUser) || {};
+            killUserFull.dead = true;
             rooms[room].hidden[killUserFull.role]--;
             rooms[room].aliveCount--;
             rooms[room].message = `${killUser} was killed by the mafia`;
@@ -183,7 +187,8 @@ io.on('connection', (socket) => {
             }
           });
           
-          const killUserFull = roomUsers[room].find(user => user.name === killUser) || {};
+          const killUserFull = roomUsers[room].find(us => us.name === killUser) || {};
+          killUserFull.dead = true;
           rooms[room].hidden[killUserFull.role]--;
           rooms[room].aliveCount--;
           rooms[room].message = `${killUser} was lynched by the village`;
@@ -217,13 +222,17 @@ io.on('connection', (socket) => {
     socket.on('disconnect', () => {
       if (rooms[room]) {
         roomUsers[room] = roomUsers[room].filter(us => us !== user);
-        if (rooms[room].dayCount > 0){
+        if (rooms[room].dayCount > 0) {
+          if (!user.dead) {
+          user.dead = true;
           rooms[room].hidden[user.role]--;
           rooms[room].aliveCount--;
+          io.to(room).emit('room_users', [{ name: user.name, dead: true }]);
+          }
+
           rooms[room].message = `${user.name} left the game`;
           const roomStatus = { ...rooms[room] };
           io.to(room).emit('room_status', roomStatus);
-          io.to(room).emit('room_users', [{ name: user.name, dead: true }]);
         } else {
           io.to(room).emit('room_users', [{ name: user.name, remove: true }]);
         }
