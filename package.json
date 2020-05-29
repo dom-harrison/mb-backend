@@ -3,7 +3,7 @@
   "version": "0.0.1",
   "description": "backedn socket.io app",
   "scripts": {
-    "start": "node index.js"
+    "start": "nodemon index.js"
   },
   "dependencies": {
     "express": "^4.17.1",
