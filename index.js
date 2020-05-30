@@ -47,7 +47,10 @@ io.on('connection', (socket) => {
             message: '',
             votes: {},
             aliveCount: 0,
-            revote: false,
+            revote: {
+              count: 0,
+              users: []
+            },
             hidden: {
               actions: { mafia: {} },
               actionCount: 0,
@@ -191,9 +194,10 @@ io.on('connection', (socket) => {
 
           const targetsWithMaxNumberOfVotes = Object.keys(votes).filter(target => votes[target] === maxNumberOfVotes);
           if (targetsWithMaxNumberOfVotes.length > 1) {
-            rooms[room].message = `Vote was a tie between ${targetsWithMaxNumberOfVotes.join(' and ')}. Revote`;
+            rooms[room].message = `Vote was a tie between ${targetsWithMaxNumberOfVotes.join(' and ')} - revote between them`;
             rooms[room].votes = {};
-            rooms[room].revote = true;
+            rooms[room].revote.count++;
+            rooms[room].revote.users = targetsWithMaxNumberOfVotes;
           } else {
             const killUser = targetsWithMaxNumberOfVotes[0];
             const killUserFull = roomUsers[room].find(us => us.name === killUser) || {};
@@ -205,6 +209,8 @@ io.on('connection', (socket) => {
             
             rooms[room].nightTime = true;
             rooms[room].votes = {};
+            rooms[room].revote.count = 0;
+            rooms[room].revote.users = [];
           }
         }
       }
