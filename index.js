@@ -46,8 +46,11 @@ io.on('connection', (socket) => {
             nightTime: false,
             message: '',
             votes: {},
-            voteCount: 0,
             aliveCount: 0,
+            revote: {
+              count: 0,
+              users: []
+            },
             hidden: {
               actions: { mafia: {} },
               actionCount: 0,
@@ -174,29 +177,41 @@ io.on('connection', (socket) => {
   
       } else if (rooms[room] && !rooms[room].nightTime) {
         rooms[room].votes[target] = rooms[room].votes[target] ? rooms[room].votes[target] + 1 : 1;
-        rooms[room].voteCount++;
-
         const roomStatus = { ...rooms[room] };
+
         io.to(room).emit('room_status', roomStatus);
 
-        if (rooms[room].voteCount === rooms[room].aliveCount) {
-          let killUser = undefined;
-          Object.keys(rooms[room].votes).forEach(trgt => {
-            if (!killUser || rooms[room].votes[trgt] > rooms[room].votes[killUser]) {
-              killUser = trgt;
+        const votes = rooms[room].votes;
+        const voteCount = votes ? Object.values(votes).reduce((a, b) => a + b, 0) : 0;
+        if (voteCount === rooms[room].aliveCount) {
+          let maxNumberOfVotes = undefined;
+          Object.keys(votes).forEach(target => {
+            const numberOfVotesForTarget = votes[target];
+            if (!maxNumberOfVotes || numberOfVotesForTarget > maxNumberOfVotes) {
+              maxNumberOfVotes = numberOfVotesForTarget;
             }
           });
-          
-          const killUserFull = roomUsers[room].find(us => us.name === killUser) || {};
-          killUserFull.dead = true;
-          rooms[room].hidden[killUserFull.role]--;
-          rooms[room].aliveCount--;
-          rooms[room].message = `${killUser} was lynched by the village`;
-          io.to(room).emit('room_users', [{ name: killUser, dead: true }]);
-          
-          rooms[room].nightTime = true;
-          rooms[room].voteCount = 0;
-          rooms[room].votes = {};
+
+          const targetsWithMaxNumberOfVotes = Object.keys(votes).filter(target => votes[target] === maxNumberOfVotes);
+          if (targetsWithMaxNumberOfVotes.length > 1) {
+            rooms[room].message = `Vote was a tie between ${targetsWithMaxNumberOfVotes.join(' and ')} - revote between them`;
+            rooms[room].votes = {};
+            rooms[room].revote.count++;
+            rooms[room].revote.users = targetsWithMaxNumberOfVotes;
+          } else {
+            const killUser = targetsWithMaxNumberOfVotes[0];
+            const killUserFull = roomUsers[room].find(us => us.name === killUser) || {};
+            killUserFull.dead = true;
+            rooms[room].hidden[killUserFull.role]--;
+            rooms[room].aliveCount--;
+            rooms[room].message = `${killUser} was lynched by the village`;
+            io.to(room).emit('room_users', [{ name: killUser, dead: true }]);
+            
+            rooms[room].nightTime = true;
+            rooms[room].votes = {};
+            rooms[room].revote.count = 0;
+            rooms[room].revote.users = [];
+          }
         }
       }
 
