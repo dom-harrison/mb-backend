@@ -1,6 +1,8 @@
 var app = require('express')();
 var http = require('http').createServer(app);
-var io = require('socket.io')(http);
+var io = require('socket.io')(http, {
+  pingTimeout: 60000,
+});
 
 app.get('/', (req, res) => {
   res.send('Mafia Bros!');
@@ -26,7 +28,6 @@ io.on('connection', (socket) => {
     let user;
 
     socket.on('login', ({ name, roomName }) => {
-      console.log('login: ', name );
       users[id] = name;
       room = roomName;
       user = {
@@ -234,7 +235,8 @@ io.on('connection', (socket) => {
       console.log(`${id}: ${msg}`);
     });
 
-    socket.on('disconnect', () => {
+    socket.on('disconnect', (reason) => {
+      console.log('disconnect reason:',reason, 'user:', user)
       if (rooms[room]) {
         roomUsers[room] = roomUsers[room].filter(us => us !== user);
         if (rooms[room].dayCount > 0) {
