@@ -6,7 +6,9 @@ var io = require('socket.io')(http, {
 
 const makeHandlers = require('./handlers');
 const RoomManager = require('./RoomManager');
+const UserManager = require('./UserManager');
 const roomManager = RoomManager();
+const userManager = UserManager();
 
 app.get('/', (req, res) => {
   res.send('Mafia Bros!');
@@ -15,12 +17,15 @@ app.get('/', (req, res) => {
 io.on('connection', (socket) => {
 
   const { 
+    handleConnection,
     handleLogin,
     handleLeaveRoom,
     handleStartGame,
     handleAction,
-    handleDisconnecting,
-  } = makeHandlers(socket, roomManager);
+    handleDisconnected,
+  } = makeHandlers(io, socket, roomManager, userManager);
+
+  handleConnection();
 
   socket.on('login', handleLogin);
 
@@ -30,7 +35,7 @@ io.on('connection', (socket) => {
 
   socket.on('action', handleAction);
 
-  socket.on('disconnecting', handleDisconnecting);
+  socket.on('disconnected', handleDisconnected);
   
 });
 
