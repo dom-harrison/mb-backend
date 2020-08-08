@@ -24,6 +24,15 @@ module.exports = function () {
     }
   }
 
+  function broadcastReconnectRoom(name, socket) {
+    const reconnectRoom = Array.from(rooms.values()).find(r => r.getUserByName(name) && r.getUserByName(name).leaving && !r.getStatus().gameOver);
+    if (reconnectRoom) {
+      socket.emit('reconnect_room', reconnectRoom.getStatus().name);
+    } else {
+      socket.emit('reconnect_room');
+    }
+  }
+
   function serializeRooms() {
     return Array.from(chatrooms.values()).map(c => c.serialize())
   }
@@ -33,6 +42,7 @@ module.exports = function () {
     removeRoom,
     getRoomByName,
     broadcastOpenRooms,
+    broadcastReconnectRoom,
     serializeRooms
   }
 }

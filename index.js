@@ -19,6 +19,8 @@ io.on('connection', (socket) => {
   const { 
     handleConnection,
     handleLogin,
+    handleLogout,
+    handleJoinRoom,
     handleLeaveRoom,
     handleStartGame,
     handleAction,
@@ -28,6 +30,10 @@ io.on('connection', (socket) => {
   handleConnection();
 
   socket.on('login', handleLogin);
+
+  socket.on('logout', handleLogout);
+
+  socket.on('join_room', handleJoinRoom);
 
   socket.on('leave_room', handleLeaveRoom);
 

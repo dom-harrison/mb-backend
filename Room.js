@@ -24,28 +24,34 @@ module.exports = function (roomName) {
         policeman: 0,
     };
 
-    let roomMessages = []
-    let absentUsers = []
+    let absentUsers = [];
 
-    function addUser(name, socket, reconnecting) {
+    function addUser(name, socket) {
       const existingUser = getUserByName(name);
 
       if (existingUser) {
+        delete existingUser.leaving;
         if (existingUser.socket && existingUser.socket.id !== socket.id) {
           removeUser(existingUser.socket);
           users.set(socket.id, { ...existingUser, name, socket });
         }
         const currentUserDetails = [{ ...existingUser, socket: undefined }];
+        broadcastUsers(false, socket);
         broadcastUsersUpdate(currentUserDetails, socket);
+        if (existingUser.role === 'mafia') {
+          const mafiaUsers = Array.from(users.values())
+            .filter(u => u.role === 'mafia' && u.name !== existingUser.name)
+            .map(u => ({ name: u.name, role: 'mafia'}));
+          broadcastUsersUpdate(mafiaUsers, socket);
+        } else if (existingUser.role === 'policeman') {
+          const investigatedUsers = Array.from(users.values())
+            .filter(u => existingUser.investigated.includes(u.name))
+            .map(u => ({ name: u.name, role: u.role }));
+          broadcastUsersUpdate(investigatedUsers, socket);
+        }
       } else {
         users.set(socket.id, { name, socket });
       }
-
-      if (reconnecting) {
-        broadcastUsers(false, socket);
-        broadcastUsersUpdate(roomMessages, socket);
-      }
-
       socket.join(roomName);
       socket.emit('room_status', status);
     }
@@ -90,7 +96,11 @@ module.exports = function (roomName) {
     }
 
     function broadcastStatus() {
-      users.forEach(u => u.socket.emit('room_status', status))
+      users.forEach(u => {
+        if (!u.leaving) {
+          u.socket.emit('room_status', status)
+        }
+      })
     }
 
     function broadcastUsers(roles, socket, sendAbsents) {
@@ -115,7 +125,6 @@ module.exports = function (roomName) {
       if (socket) {
         socket.emit('room_users', updatedUsers);
       } else {
-        roomMessages = [...roomMessages, ...updatedUsers];
         users.forEach(u => u.socket.emit('room_users', updatedUsers));
       }
     }

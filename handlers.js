@@ -11,17 +11,44 @@ const shuffleArray = (array) => {
 module.exports = function (io, socket, roomManager, userManager) {
 
   const handleConnection = () => {
-    console.log('Connected-Socket:',socket.id);
-    userManager.addUser(socket);
+    console.log('Connected:',socket.id);
     roomManager.broadcastOpenRooms(io, socket);
   };
 
-  const handleLogin = ({ name, roomName, reconnecting }) => {
+  const handleLogin = ({ name, reconnecting }) => {
+    console.log('Login:', socket.id, 'Name:', name, 'Reconnecting:', !!reconnecting, );
+    const socketExists = userManager.getUserBySocket(socket);
+    if (socketExists) {
+      userManager.removeUser(socketExists.name);
+    }
+    
+    const userExists = userManager.getUserByName(name);
+    if (userExists) {
+      if (reconnecting) {
+        userManager.removeUser(name);
+      } else {
+        return socket.emit('connect_error', 'user-exists');
+      }
+    }
+
+    userManager.addUser(name, socket);
+    roomManager.broadcastReconnectRoom(name, socket);
+  }
+
+  const handleLogout = (message) => {
+    const socketExists = userManager.getUserBySocket(socket);
+    console.log('Logout:', socket.id, 'Name:', socketExists && socketExists.name, 'Message:', message);
+    if (socketExists) {
+      userManager.removeUser(socketExists.name);
+    } 
+  }
+
+  const handleJoinRoom = ({ name, roomName, reconnecting }) => {
     let room = roomManager.getRoomByName(roomName);
     if (reconnecting) {
-      console.log('Reconnected-Socket:',socket.id, 'User:',name, 'Room:', roomName);
+      console.log('RejoinRoom:',socket.id, 'User:',name, 'Room:', roomName);
     } else {
-      console.log('Login-Socket:',socket.id, 'User:',name, 'Room:',roomName);
+      console.log('JoinRoom:',socket.id, 'User:',name, 'Room:',roomName);
     }
 
     if (!room) {
@@ -41,38 +68,58 @@ module.exports = function (io, socket, roomManager, userManager) {
     }
   };
 
-  const handleLeaveRoom = (submittedRoomName) => {
-    const roomName = submittedRoomName || Object.keys(socket.rooms).find(room => room !== socket.id);
+  const handleLeaveRoom = () => {
+    const roomName = Object.keys(socket.rooms).find(room => room !== socket.id);
     const room = roomManager.getRoomByName(roomName);
     const user = room && room.getUsers().get(socket.id);
-    console.log('Leave-Socket:',socket.id, 'User:',user && user.name, 'Room:',roomName);
+    console.log('LeaveRoom:',socket.id, 'User:',user && user.name, 'Room:',roomName);
 
     if (room && room.getUsers().size > 0) {
-      room.removeUser(socket);
       if (user && room.getStatus().dayCount > 0 && !room.getStatus().gameOver) {
-        if (!user.dead) {
-            user.dead = true;
-            room.getHiddenStatus()[user.role]--;
-            room.getStatus().aliveCount--;
-            room.broadcastUsersUpdate([{ name: user.name, dead: true }]);
-        }
-      room.setAbsentUser(user.name, user.role);
-      room.setStatus({message: `${user.name} left the game`});
-      room.broadcastStatus();
-      handleAction({ leaving: true });
+        user.leaving = true;
+        roomManager.broadcastReconnectRoom(user.name, socket);
+
+        setTimeout(() => {
+          if (user.leaving) {
+            room.removeUser(socket);
+            roomManager.broadcastReconnectRoom(user.name, socket);
+            console.log('Leaving Room:', roomName, 'User:',user && user.name);
+            if (!user.dead) {
+              user.dead = true;
+              room.getHiddenStatus()[user.role]--;
+              room.getStatus().aliveCount--;
+              room.broadcastUsersUpdate([{ name: user.name, dead: true }]);
+            }
+            room.setAbsentUser(user.name, user.role);
+            room.setStatus({message: `${user.name} left the game`});
+            room.broadcastStatus();
+            handleAction({ leaving: true });
+            roomManager.broadcastOpenRooms(io, socket);
+
+            if (room && room.getUsers().size === 0) {
+              roomManager.removeRoom(roomName);
+              console.log(roomName, 'is now closed');
+              roomManager.broadcastOpenRooms(io);
+            }
+          }
+        }, 45000)
+
       } else {
+        room.removeUser(socket);
         room.broadcastUsersUpdate([{ name: user && user.name, remove: true }]);
+
+        socket.leave(roomName);
+        roomManager.broadcastOpenRooms(io, socket);
+
+        if (room && room.getUsers().size === 0) {
+            roomManager.removeRoom(roomName);
+            console.log(roomName, 'is now closed');
+            roomManager.broadcastOpenRooms(io);
+        }
       }
-    }
-    socket.leave(roomName);
-    roomManager.broadcastOpenRooms(io, socket);
-    if (room && room.getUsers().size === 0) {
-        roomManager.removeRoom(roomName);
-        console.log(roomName, 'is now closed');
-        roomManager.broadcastOpenRooms(io);
+
     }
   };
-  
       
   const handleStartGame = () => {
     const roomName = Object.keys(socket.rooms).find(room => room !== socket.id);
@@ -92,6 +139,9 @@ module.exports = function (io, socket, roomManager, userManager) {
       } else {
         mafiaUsers.push({ name: usersArray[ix].name, role })
       }
+      if (role === 'policeman'){
+        usersArray[ix].investigated = [];
+      }
     });
 
     // Send all mafia users to all mafia
@@ -110,25 +160,33 @@ module.exports = function (io, socket, roomManager, userManager) {
   const handleAction = ({ target, role, leaving }) => {
     const roomName = Object.keys(socket.rooms).find(room => room !== socket.id);
     const room = roomManager.getRoomByName(roomName);
+    
 
     if (room) {
+      const user = room.getUsers().get(socket.id);
+      const eventStamp = `${room.getStatus().dayCount}${room.getStatus().nightTime}${room.getStatus().revote.count}`
+
       if (room.getStatus().nightTime) {
         const actions = room.getHiddenStatus().actions;
 
         if (!leaving) {
-          room.getHiddenStatus().actionCount++;  
+          room.getHiddenStatus().actionCount++;
           switch (role) {
             case 'mafia':
               actions.mafia[target] = actions.mafia[target] ? actions.mafia[target] + 1 : 1;
               break;
             case 'policeman':
               const targetRole = room.getUserByName(target).role;
+              user.investigated.push(target);
               room.broadcastUsersUpdate([{ name: target, role: targetRole }], socket);
               actions[role] = target;
               break;
             default:
               actions[role] = target;
           }
+          user.previousEvent = eventStamp;
+          user.previousTarget = target;
+          room.broadcastUsersUpdate([{ name: user.name, previousEvent: eventStamp, previousTarget: target }], socket);
           room.broadcastStatus();
         }
 
@@ -173,6 +231,9 @@ module.exports = function (io, socket, roomManager, userManager) {
 
         if (!leaving) {
           votes[target] = votes[target] ? votes[target] + 1 : 1;
+          user.previousEvent = eventStamp;
+          user.previousTarget = target;
+          room.broadcastUsersUpdate([{ name: user.name, previousEvent: eventStamp, previousTarget: target }], socket);
           room.broadcastStatus();
         }
         
@@ -241,6 +302,8 @@ module.exports = function (io, socket, roomManager, userManager) {
   return {
     handleConnection,
     handleLogin,
+    handleLogout,
+    handleJoinRoom,
     handleLeaveRoom,
     handleStartGame,
     handleAction,
