@@ -37,11 +37,14 @@ module.exports = function (io, socket, roomManager, userManager) {
 
   const handleLogout = (message) => {
     const socketExists = userManager.getUserBySocket(socket);
+    const roomExists= Object.keys(socket.rooms).find(room => room !== socket.id);
     console.log('Logout:', socket.id, 'Name:', socketExists && socketExists.name, 'Message:', message);
     if (socketExists) {
       userManager.removeUser(socketExists.name);
+    }
+    if (roomExists) {
       handleLeaveRoom();
-    } 
+    }
   }
 
   const handleJoinRoom = ({ name, roomName, reconnecting }) => {
