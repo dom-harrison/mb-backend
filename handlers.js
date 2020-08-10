@@ -40,6 +40,7 @@ module.exports = function (io, socket, roomManager, userManager) {
     console.log('Logout:', socket.id, 'Name:', socketExists && socketExists.name, 'Message:', message);
     if (socketExists) {
       userManager.removeUser(socketExists.name);
+      handleLeaveRoom();
     } 
   }
 
