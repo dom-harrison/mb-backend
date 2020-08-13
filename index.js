@@ -42,7 +42,6 @@ io.on('connection', (socket) => {
   socket.on('action', handleAction);
 
   socket.on('disconnected', handleDisconnected);
-  
 });
 
 http.listen(4000, '0.0.0.0', () => {
