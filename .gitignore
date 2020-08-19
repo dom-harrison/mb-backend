@@ -11,6 +11,9 @@
 # production
 /build
 
+# service account info
+fb-service-account.json
+
 # misc
 .DS_Store
 .env.local

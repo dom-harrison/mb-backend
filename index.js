@@ -4,6 +4,26 @@ var io = require('socket.io')(http, {
   pingTimeout: 60000,
 });
 
+console.log(app.settings.env);
+const devEnvironment = app.settings.env === 'development';
+const admin = require('firebase-admin');
+const serviceAccount = require('./fb-service-account.json');
+
+admin.initializeApp({
+  credential: devEnvironment ? admin.credential.cert(serviceAccount) : admin.credential.applicationDefault(),
+});
+
+const db = admin.firestore();
+
+async function quickstartListen(db) {
+  const snapshot = await db.collection('mafia-bros-db').get();
+  snapshot.forEach((doc) => {
+    console.log(doc.id, '=>', doc.data());
+  });
+}
+
+quickstartListen(db);
+
 const makeHandlers = require('./handlers');
 const RoomManager = require('./RoomManager');
 const UserManager = require('./UserManager');
