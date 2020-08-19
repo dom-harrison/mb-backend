@@ -8,6 +8,7 @@ module.exports = function (roomName) {
         message: '',
         votes: {},
         aliveCount: 0,
+        gameOver: '',
         revote: {
             count: 0,
             users: []
@@ -23,14 +24,41 @@ module.exports = function (roomName) {
         policeman: 0,
     };
 
+    let absentUsers = [];
+
     function addUser(name, socket) {
-      users.set(socket.id, { name, socket })
-      socket.join(roomName)
+      const existingUser = getUserByName(name);
+
+      if (existingUser) {
+        delete existingUser.leaving;
+        if (existingUser.socket && existingUser.socket.id !== socket.id) {
+          removeUser(existingUser.socket);
+          users.set(socket.id, { ...existingUser, name, socket });
+        }
+        const currentUserDetails = [{ ...existingUser, socket: undefined }];
+        broadcastUsers(false, socket);
+        broadcastUsersUpdate(currentUserDetails, socket);
+        if (existingUser.role === 'mafia') {
+          const mafiaUsers = Array.from(users.values())
+            .filter(u => u.role === 'mafia' && u.name !== existingUser.name)
+            .map(u => ({ name: u.name, role: 'mafia'}));
+          broadcastUsersUpdate(mafiaUsers, socket);
+        } else if (existingUser.role === 'policeman') {
+          const investigatedUsers = Array.from(users.values())
+            .filter(u => existingUser.investigated.includes(u.name))
+            .map(u => ({ name: u.name, role: u.role }));
+          broadcastUsersUpdate(investigatedUsers, socket);
+        }
+      } else {
+        users.set(socket.id, { name, socket });
+      }
+      socket.join(roomName);
       socket.emit('room_status', status);
     }
     
     function removeUser(socket) {
-      users.delete(socket.id)
+      users.delete(socket.id);
+      socket.leave(roomName);
     }
 
     function getUsers() {
@@ -39,6 +67,10 @@ module.exports = function (roomName) {
 
     function getUserByName(name) {
       return Array.from(users.values()).find(us => us.name === name);
+    }
+
+    function setAbsentUser(name, role) {
+      absentUsers.push({ name, role });
     }
 
     function getStatus() {
@@ -64,19 +96,36 @@ module.exports = function (roomName) {
     }
 
     function broadcastStatus() {
-      users.forEach(u => u.socket.emit('room_status', status))
+      users.forEach(u => {
+        if (!u.leaving) {
+          u.socket.emit('room_status', status)
+        }
+      })
     }
 
-    function broadcastUsers() {
-      const usersArray = Array.from(users.values()).map(u => ({ ...u, socket: undefined }) );
-      users.forEach(u => u.socket.emit('room_users', usersArray))
+    function broadcastUsers(roles, socket, sendAbsents) {
+      const usersArray = Array.from(users.values()).map(u => {
+        if (roles) {
+          return ({ name: u.name, role: u.role || '', dead: u.dead || false});
+        } else {
+          return ({ name: u.name, dead: u.dead || false});
+        };
+      });
+      if (socket) {
+        socket.emit('room_users', usersArray);
+      } else {
+        users.forEach(u => u.socket.emit('room_users', usersArray))
+      }
+      if (sendAbsents) {
+        users.forEach(u => u.socket.emit('room_users', absentUsers));
+      }
     }
 
     function broadcastUsersUpdate(updatedUsers, socket) {
       if (socket) {
-        socket.emit('room_users', updatedUsers)
+        socket.emit('room_users', updatedUsers);
       } else {
-        users.forEach(u => u.socket.emit('room_users', updatedUsers))
+        users.forEach(u => u.socket.emit('room_users', updatedUsers));
       }
     }
   
@@ -92,6 +141,7 @@ module.exports = function (roomName) {
       removeUser,
       getUsers,
       getUserByName,
+      setAbsentUser,
       getStatus,
       setStatus,
       getHiddenStatus,
