@@ -4,13 +4,16 @@ var io = require('socket.io')(http, {
   pingTimeout: 60000,
 });
 
-console.log(app.settings.env);
-const devEnvironment = app.settings.env === 'development';
+console.log(process.env.ENV);
 const admin = require('firebase-admin');
-const serviceAccount = require('./fb-service-account.json');
+let serviceAccount;
+
+if (process.env.ENV !== 'prod') {
+  serviceAccount = require('./fb-service-account.json');
+}
 
 admin.initializeApp({
-  credential: devEnvironment ? admin.credential.cert(serviceAccount) : admin.credential.applicationDefault(),
+  credential: serviceAccount ? admin.credential.cert(serviceAccount) : admin.credential.applicationDefault(),
 });
 
 const db = admin.firestore();
