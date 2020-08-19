@@ -3,12 +3,14 @@ var http = require('http').createServer(app);
 var io = require('socket.io')(http, {
   pingTimeout: 60000,
 });
+const PORT = process.env.PORT || 4000;
+const ENV = process.env.ENV || 'development';
 
-console.log(process.env.ENV);
+console.log(ENV);
 const admin = require('firebase-admin');
 let serviceAccount;
 
-if (process.env.ENV !== 'prod') {
+if (ENV === 'development') {
   serviceAccount = require('./fb-service-account.json');
 }
 
@@ -67,6 +69,6 @@ io.on('connection', (socket) => {
   socket.on('disconnected', handleDisconnected);
 });
 
-http.listen(4000, '0.0.0.0', () => {
-  console.log('listening on *:4000');
+http.listen(PORT, '0.0.0.0', () => {
+  console.log(`listening on port: ${PORT}`);
 });
