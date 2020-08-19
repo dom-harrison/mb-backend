@@ -3,6 +3,7 @@ var http = require('http').createServer(app);
 var io = require('socket.io')(http, {
   pingTimeout: 60000,
 });
+const PORT = process.env.PORT || 4000;
 
 const makeHandlers = require('./handlers');
 const RoomManager = require('./RoomManager');
@@ -44,6 +45,6 @@ io.on('connection', (socket) => {
   socket.on('disconnected', handleDisconnected);
 });
 
-http.listen(4000, '0.0.0.0', () => {
-  console.log('listening on *:4000');
+http.listen(PORT, '0.0.0.0', () => {
+  console.log(`listening on port: ${PORT}`);
 });
