@@ -5,8 +5,8 @@ var io = require('socket.io')(http, {
 });
 const PORT = process.env.PORT || 4000;
 const ENV = process.env.ENV || 'development';
-
 console.log(ENV);
+
 const admin = require('firebase-admin');
 let serviceAccount;
 
@@ -20,20 +20,11 @@ admin.initializeApp({
 
 const db = admin.firestore();
 
-async function quickstartListen(db) {
-  const snapshot = await db.collection('mafia-bros-db').get();
-  snapshot.forEach((doc) => {
-    console.log(doc.id, '=>', doc.data());
-  });
-}
-
-quickstartListen(db);
-
 const makeHandlers = require('./handlers');
 const RoomManager = require('./RoomManager');
 const UserManager = require('./UserManager');
 const roomManager = RoomManager();
-const userManager = UserManager();
+const userManager = UserManager(db);
 
 app.get('/', (req, res) => {
   res.send('Mafia Bros!');

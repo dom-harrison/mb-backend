@@ -15,35 +15,38 @@ module.exports = function (io, socket, roomManager, userManager) {
     roomManager.broadcastOpenRooms(io, socket);
   };
 
-  const handleLogin = ({ name, reconnecting }) => {
+  const handleLogin = async ({ name, reconnecting }) => {
     console.log('Login:', socket.id, 'Name:', name, 'Reconnecting:', !!reconnecting, );
-    const socketExists = userManager.getUserBySocket(socket);
-    if (socketExists) {
-      userManager.removeUser(socketExists.name);
-    }
     
-    const userExists = userManager.getUserByName(name);
+    const userExists = await userManager.getUserByName(name);
+
     if (userExists) {
       if (reconnecting) {
         userManager.removeUser(name);
-      } else {
+      } else if (userExists.socketId !== socket.id){
         return socket.emit('connect_error', 'user-exists');
       }
+    }
+
+    const socketExists = await userManager.getUserBySocket(socket);
+
+    if (socketExists) {
+      userManager.removeUser(socketExists.name);
     }
 
     userManager.addUser(name, socket);
     roomManager.broadcastReconnectRoom(name, socket);
   }
 
-  const handleLogout = (message) => {
-    const socketExists = userManager.getUserBySocket(socket);
-    const roomExists= Object.keys(socket.rooms).find(room => room !== socket.id);
+  const handleLogout = async (message) => {
+    const roomExists = Object.keys(socket.rooms).find(room => room !== socket.id);
+    if (roomExists) {
+      handleLeaveRoom();
+    }
+    const socketExists = await userManager.getUserBySocket(socket);
     console.log('Logout:', socket.id, 'Name:', socketExists && socketExists.name, 'Message:', message);
     if (socketExists) {
       userManager.removeUser(socketExists.name);
-    }
-    if (roomExists) {
-      handleLeaveRoom();
     }
   }
 
