@@ -1,9 +1,10 @@
 {
   "name": "mafia-bros-backend",
   "version": "0.0.1",
-  "description": "backedn socket.io app",
+  "description": "backend socket.io app",
   "scripts": {
-    "start": "nodemon index.js"
+    "start": "nodemon index.js",
+    "start:debug": "nodemon --inspect index.js"
   },
   "dependencies": {
     "express": "^4.17.1",
