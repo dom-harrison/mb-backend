@@ -4,7 +4,7 @@
   "description": "backend socket.io app",
   "scripts": {
     "start": "nodemon index.js",
-    "start:debug": "nodemon --inspect index.js"
+    "debug": "nodemon --inspect index.js"
   },
   "dependencies": {
     "express": "^4.17.1",

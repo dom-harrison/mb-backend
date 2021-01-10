@@ -1,48 +1,92 @@
 const Room = require('./Room')
 
-module.exports = function () {
-  const rooms = new Map();
+module.exports = function (db, io) {
+  const MB_ROOMS = db.collection('mb-rooms');
+  const MB_ROOMS_USERS = db.collectionGroup('roomUsers');
 
-  function addRoom(roomName) {
-    rooms.set(roomName, Room(roomName));
-  }
+  const addRoom = async (roomName) => {
+    const newRoomRef = MB_ROOMS.doc(roomName);  
+    await newRoomRef.set({
+      status: {
+        roomName,
+        dayCount: 0,
+        nightTime: false,
+        message: '',
+        votes: {},
+        aliveCount: 0,
+        gameOver: false,
+        revote: {
+          count: 0,
+          users: []
+        }
+      },
+      hiddenStatus: {
+        actions: { mafia: {} },
+        mafia: 0,
+        villager: 0,
+        doctor: 0,
+        policeman: 0,
+      },
+    });
+  };
 
-  function removeRoom(roomName) {
-    rooms.delete(roomName);
-  }
+  const removeRoom = async (roomName) => {
+    await MB_ROOMS.doc(roomName).delete();
+  };
 
-  function getRoomByName(roomName) {
-    return rooms.get(roomName)
-  }
+  const getRoomByName = async (roomName) => {
+    let room;
+    const doc = await MB_ROOMS.doc(roomName).get()
+    if (doc.exists) {
+      const details = doc.data();
+      room = Room(roomName, details, db, io);
+    }
+    return room;
+  };
 
-  function broadcastOpenRooms(io, socket) {
-    const roomsArray = Array.from(rooms.values()).filter(r => r.getStatus().dayCount === 0).map(r => r.getStatus().name);
+  const broadcastOpenRooms = async (socket) => {
+    let roomsArray = [];
+    const snapshot = await MB_ROOMS.where('status.dayCount', '==', 0).get()
+    if (!snapshot.empty) {
+      roomsArray = snapshot.docs.map((doc) => doc.id);
+    }
     if (socket){
       socket.emit('open_rooms', roomsArray);
     } else {
       io.emit('open_rooms', roomsArray);
     }
-  }
+  };
 
-  function broadcastReconnectRoom(name, socket) {
-    const reconnectRoom = Array.from(rooms.values()).find(r => r.getUserByName(name) && r.getUserByName(name).leaving && !r.getStatus().gameOver);
-    if (reconnectRoom) {
-      socket.emit('reconnect_room', reconnectRoom.getStatus().name);
-    } else {
-      socket.emit('reconnect_room');
+  const broadcastRejoinRoom = async (userName, socket, leftRoom) => {
+    if (leftRoom) {
+      return socket.emit('rejoin_room');
     }
-  }
+    let parentId;
+    let rejoinRoom;
+    const snapshot = await MB_ROOMS_USERS.where('userName', '==', userName).get();
+    if (!snapshot.empty) {
+      parentId = snapshot.docs[0].ref.parent.parent.id;
+    }
 
-  function serializeRooms() {
-    return Array.from(chatrooms.values()).map(c => c.serialize())
-  }
+    if (parentId) {
+      const doc = await MB_ROOMS.doc(parentId).get()
+      if (doc.exists && !doc.data().status.gameOver) {
+      rejoinRoom = doc.id;
+      }
+    }
+
+    if (rejoinRoom) {
+      socket.emit('rejoin_room', rejoinRoom);
+    } else {
+      socket.emit('rejoin_room');
+    }
+  };
 
   return {
     addRoom,
     removeRoom,
     getRoomByName,
     broadcastOpenRooms,
-    broadcastReconnectRoom,
-    serializeRooms
+    broadcastRejoinRoom,
   }
 }

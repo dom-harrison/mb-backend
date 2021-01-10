@@ -1,154 +1,174 @@
-module.exports = function (roomName) {
-    const users = new Map()
+const admin = require('firebase-admin');
 
-    let status = {
-        name: roomName,
-        dayCount: 0,
-        nightTime: false,
-        message: '',
-        votes: {},
-        aliveCount: 0,
-        gameOver: '',
-        revote: {
-            count: 0,
-            users: []
-        }
-    };
+module.exports = function (roomName, details, db, io) {
+  const MB_ROOM = db.collection('mb-rooms').doc(roomName);
+  const MB_ROOM_USERS = MB_ROOM.collection('roomUsers');
+  const MB_ABSENT_USERS = MB_ROOM.collection('absentUsers');
 
-    let hiddenStatus = {
-        actions: { mafia: {} },
-        actionCount: 0,
-        mafia: 0,
-        villager: 0,
-        doctor: 0,
-        policeman: 0,
-    };
-
-    let absentUsers = [];
-
-    function addUser(name, socket) {
-      const existingUser = getUserByName(name);
-
-      if (existingUser) {
-        delete existingUser.leaving;
-        if (existingUser.socket && existingUser.socket.id !== socket.id) {
-          removeUser(existingUser.socket);
-          users.set(socket.id, { ...existingUser, name, socket });
-        }
-        const currentUserDetails = [{ ...existingUser, socket: undefined }];
-        broadcastUsers(false, socket);
-        broadcastUsersUpdate(currentUserDetails, socket);
-        if (existingUser.role === 'mafia') {
-          const mafiaUsers = Array.from(users.values())
-            .filter(u => u.role === 'mafia' && u.name !== existingUser.name)
-            .map(u => ({ name: u.name, role: 'mafia'}));
-          broadcastUsersUpdate(mafiaUsers, socket);
-        } else if (existingUser.role === 'policeman') {
-          const investigatedUsers = Array.from(users.values())
-            .filter(u => existingUser.investigated.includes(u.name))
-            .map(u => ({ name: u.name, role: u.role }));
-          broadcastUsersUpdate(investigatedUsers, socket);
-        }
-      } else {
-        users.set(socket.id, { name, socket });
-      }
-      socket.join(roomName);
+    const addUser = async (userName, socket, rejoining) => {
+      const { status } = details;
       socket.emit('room_status', status);
+
+      if (!rejoining) {
+        socket.join(roomName);
+        broadcastUsersUpdate([{userName}]);
+        await MB_ROOM_USERS.doc(socket.id).set({ userName, socketId: socket.id });
+        broadcastUsers(false);
+      } else {
+        const existingUser = await getUserByName(userName);
+        if (existingUser) {
+          if (existingUser.socketId !== socket.id) {
+            removeUser(existingUser.socketId);
+            
+            MB_ROOM_USERS.doc(socket.id).set({ ...existingUser, userName, socketId: socket.id, leaving: false });
+          } else {
+            await updateUser(socket.id, { leaving: false });
+          }
+          socket.join(roomName);
+          const currentUserDetails = [{ ...existingUser, socket: undefined, leaving: false }];
+        broadcastUsers(false, socket);
+          broadcastUsersUpdate(currentUserDetails, socket.id);
+  
+          if (existingUser.role === 'mafia') {
+            const users = await getUsers();
+            const mafiaUsers = users.filter(u => u.role === 'mafia' && u.userName !== existingUser.userName)
+              .map(u => ({ userName: u.userName, role: 'mafia'}));
+            broadcastUsersUpdate(mafiaUsers, socket.id);
+          } else if (existingUser.role === 'policeman') {
+            const users = await getUsers();
+            const investigatedUsers = users.filter(u => (existingUser.investigated || []).includes(u.userName))
+              .map(u => ({ userName: u.userName, role: u.role }));
+            broadcastUsersUpdate(investigatedUsers, socket.id);
+          }
+        } else {
+          return socket.emit('connect_error', 'game-started');
+        }
+      }
     }
     
-    function removeUser(socket) {
-      users.delete(socket.id);
-      socket.leave(roomName);
+    const removeUser = async (socketId) => {
+      await MB_ROOM_USERS.doc(socketId).delete();
+      const fullSocket = io.sockets.connected[socketId];
+      if (fullSocket) { fullSocket.leave(roomName) };
     }
 
-    function getUsers() {
-      return users;
+    const getUsers = async () => {
+      const snapshot = await MB_ROOM_USERS.get();
+      if (!snapshot.empty) {
+        return !snapshot.empty && snapshot.docs.map((doc) => doc.data());
+      }
+      return [];
     }
 
-    function getUserByName(name) {
-      return Array.from(users.values()).find(us => us.name === name);
+    const getUserBySocket = async (socketId) => {
+      const doc = await MB_ROOM_USERS.doc(socketId).get();
+      return doc.exists && doc.data();
     }
 
-    function setAbsentUser(name, role) {
-      absentUsers.push({ name, role });
+    const getUserByName = async (userName) => {
+      const snapshot = await MB_ROOM_USERS.where('userName', '==', userName).get();
+      return !snapshot.empty && snapshot.docs[0].data();
     }
 
-    function getStatus() {
-      return status;
-    }
-
-    function setStatus(update) {
-      status = {
-        ...status,
-        ...update
+    const updateUser = async (socketId, change, array) => {
+      if (array) {
+        await MB_ROOM_USERS.doc(socketId).update({ [array.field]: admin.firestore.FieldValue.arrayUnion(array.value) });
+      } else {
+        await MB_ROOM_USERS.doc(socketId).update(change);
       }
     }
 
-    function getHiddenStatus() {
-      return hiddenStatus;
+    const setAbsentUser = async (socketId, userName, role) => {
+      await MB_ABSENT_USERS.doc(socketId).set({ userName, role });
     }
 
-    function setHiddenStatus(update) {
-      hiddenStatus = {
-        ...hiddenStatus,
-        ...update
+    const getAbsentUsers = async () => {
+      const snapshot = await MB_ABSENT_USERS.get();
+      if (!snapshot.empty) {
+        return !snapshot.empty && snapshot.docs.map((doc) => doc.data());
+      }
+      return [];
+    }
+
+    const getDetails = async (hidden) => {
+      const doc = await MB_ROOM.get();
+      let details;
+      if (doc.exists) {
+        details = doc.data();
+      }
+      return hidden ? details.hiddenStatus : details.status;
+    }
+
+    const setStatus = async (changes, increment) => {
+      if (changes) {
+        await MB_ROOM.update(changes);
+      }
+      if (increment) {
+        await MB_ROOM.update({ [`status.${increment.field}`]: admin.firestore.FieldValue.increment(increment.amount) });
       }
     }
 
-    function broadcastStatus() {
-      users.forEach(u => {
-        if (!u.leaving) {
-          u.socket.emit('room_status', status)
-        }
-      })
+    const setHiddenStatus = async (changes, increment) => {
+      if (changes) {
+        await MB_ROOM.update(changes);
+      }
+      if (increment) {
+        await MB_ROOM.update({ [`hiddenStatus.${increment.field}`]: admin.firestore.FieldValue.increment(increment.amount) });
+      } 
     }
 
-    function broadcastUsers(roles, socket, sendAbsents) {
-      const usersArray = Array.from(users.values()).map(u => {
-        if (roles) {
-          return ({ name: u.name, role: u.role || '', dead: u.dead || false});
-        } else {
-          return ({ name: u.name, dead: u.dead || false});
-        };
+    const broadcastStatus = async () => {
+      const status = await getDetails();
+      io.in(roomName).emit('room_status', status);
+    }
+
+    const broadcastUsers = async (roles, socket, sendAbsents) => {
+      const users = await getUsers();
+      const usersArray = (users || []).map((u, index) => {
+        return ({ 
+          userName: u.userName, 
+          role: roles ? u.role : undefined, 
+          dead: u.dead || false,
+          host: index === 0,
+        }) 
       });
       if (socket) {
         socket.emit('room_users', usersArray);
       } else {
-        users.forEach(u => u.socket.emit('room_users', usersArray))
+        io.in(roomName).emit('room_users', usersArray);
       }
       if (sendAbsents) {
-        users.forEach(u => u.socket.emit('room_users', absentUsers));
+        const absentUsers = await getAbsentUsers();
+        io.in(roomName).emit('room_users', absentUsers);
       }
     }
 
-    function broadcastUsersUpdate(updatedUsers, socket) {
-      if (socket) {
-        socket.emit('room_users', updatedUsers);
+    const broadcastUsersUpdate = (updatedUsers, socketId) => {
+      if (socketId) {
+        const socket = io.sockets.connected[socketId];
+        if (socket) {
+          socket.emit('room_users', updatedUsers);
+        }
       } else {
-        users.forEach(u => u.socket.emit('room_users', updatedUsers));
+        io.in(roomName).emit('room_users', updatedUsers);
       }
     }
-  
-    function serialize() {
-      return {
-        roomName,
-        numMembers: users.size
-      }
-    }
-  
+
+
     return {
+      details,
       addUser,
       removeUser,
       getUsers,
+      getUserBySocket,
       getUserByName,
+      updateUser,
       setAbsentUser,
-      getStatus,
+      getDetails,
       setStatus,
-      getHiddenStatus,
       setHiddenStatus,
       broadcastStatus,
       broadcastUsers,
       broadcastUsersUpdate,
-      serialize
     }
   }

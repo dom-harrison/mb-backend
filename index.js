@@ -23,7 +23,7 @@ const db = admin.firestore();
 const makeHandlers = require('./handlers');
 const RoomManager = require('./RoomManager');
 const UserManager = require('./UserManager');
-const roomManager = RoomManager();
+const roomManager = RoomManager(db, io);
 const userManager = UserManager(db);
 
 app.get('/', (req, res) => {
@@ -41,7 +41,7 @@ io.on('connection', (socket) => {
     handleStartGame,
     handleAction,
     handleDisconnected,
-  } = makeHandlers(io, socket, roomManager, userManager);
+  } = makeHandlers(socket, roomManager, userManager);
 
   handleConnection();
 

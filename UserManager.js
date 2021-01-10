@@ -3,17 +3,24 @@ const Room = require('./Room')
 module.exports = function (db) {
   const MB_USERS = db.collection('mb-users');
 
+  const addUser = async (userName, socket) => {
+    const res = await MB_USERS.add({
+      userName,
+      'socketId': socket.id,
+    });
+    return res.id;
+  }
 
-  const addUser = async (name, socket) => {
-    const newUserRef = MB_USERS.doc(name);  
+  const updateUser = async (userName, id, socket) => {
+    const newUserRef = MB_USERS.doc(id);  
     await newUserRef.set({
-      name,
+      userName,
       'socketId': socket.id,
     });
   }
 
-  const removeUser = async (name) => {
-    await MB_USERS.doc(name).delete();
+  const removeUser = async (userName) => {
+    await MB_USERS.doc(userName).delete();
   }
 
   const getUsers = async () => {
@@ -21,30 +28,28 @@ module.exports = function (db) {
     return !snapshot.empty && snapshot.docs.map((doc) => doc.data());
   }
 
-  const getUserByName = async (name) => {
+  const getUserByName = async (userName) => {
     let user;
-    await MB_USERS.doc(name).get()
-    .then(doc => {
-      if (doc.exists) {
-        user = doc.data();
-      }
-    });
+    const snapshot = await MB_USERS.where('userName', '==', userName).get()
+    if (!snapshot.empty) {
+      user = snapshot.docs[0].data();
+      user.userId = snapshot.docs[0].id;
+    }
     return user;
   }
 
-  const getUserBySocket = async (socket) => {
+  const getUserBySocket = async (socketId) => {
     let user;
-    await MB_USERS.where('socketId', '==', socket.id).get()
-    .then(snapshot => {
-      if (!snapshot.empty) {
-        user = snapshot.docs[0].data();;
-      }
-    });
+    const snapshot = await MB_USERS.where('socketId', '==', socketId).get()
+    if (!snapshot.empty) {
+      user = snapshot.docs[0].data();
+    }
     return user;
   }
 
   return {
     addUser,
+    updateUser,
     removeUser,
     getUsers,
     getUserByName,

@@ -8,34 +8,37 @@ const shuffleArray = (array) => {
   return array;
 }
 
-module.exports = function (io, socket, roomManager, userManager) {
+module.exports = function (socket, roomManager, userManager) {
 
   const handleConnection = () => {
     console.log('Connected:',socket.id);
-    roomManager.broadcastOpenRooms(io, socket);
+    roomManager.broadcastOpenRooms(socket);
   };
 
-  const handleLogin = async ({ name, reconnecting }) => {
-    console.log('Login:', socket.id, 'Name:', name, 'Reconnecting:', !!reconnecting, );
-    
-    const userExists = await userManager.getUserByName(name);
+  const handleLogin = async ({ userName, userId, reconnect }) => {
+    console.log('Login:', socket.id, 'Name:', userName );
+    let loginId = userId;
+    const user = await userManager.getUserByName(userName);
 
-    if (userExists) {
-      if (reconnecting) {
-        userManager.removeUser(name);
-      } else if (userExists.socketId !== socket.id){
-        return socket.emit('connect_error', 'user-exists');
+    if (user) {
+      if (user.userId === loginId) {
+        userManager.updateUser(userName, loginId, socket);
+      } else {
+        return socket.emit('login_response', { error: 'User already exists' });
+      }      
+    } else {
+      if (loginId) {
+        userManager.updateUser(userName, loginId, socket);
+      } else {
+        loginId = await userManager.addUser(userName, socket);
       }
     }
 
-    const socketExists = await userManager.getUserBySocket(socket);
-
-    if (socketExists) {
-      userManager.removeUser(socketExists.name);
+    if (!reconnect) {
+      socket.emit('login_response', { userName, userId: loginId });
     }
-
-    userManager.addUser(name, socket);
-    roomManager.broadcastReconnectRoom(name, socket);
+    
+    roomManager.broadcastRejoinRoom(userName, socket);
   }
 
   const handleLogout = async (message) => {
@@ -43,161 +46,161 @@ module.exports = function (io, socket, roomManager, userManager) {
     if (roomExists) {
       handleLeaveRoom();
     }
-    const socketExists = await userManager.getUserBySocket(socket);
-    console.log('Logout:', socket.id, 'Name:', socketExists && socketExists.name, 'Message:', message);
+    const socketExists = await userManager.getUserBySocket(socket.id);
+    console.log('Logout:', socket.id, 'Name:', socketExists && socketExists.userName, 'Message:', message);
     if (socketExists) {
-      userManager.removeUser(socketExists.name);
+      userManager.removeUser(socketExists.userName);
     }
   }
 
-  const handleJoinRoom = ({ name, roomName, reconnecting }) => {
-    let room = roomManager.getRoomByName(roomName);
-    if (reconnecting) {
-      console.log('RejoinRoom:',socket.id, 'User:',name, 'Room:', roomName);
+  const handleJoinRoom = async ({ userName, roomName, rejoining }) => {
+    let room = await roomManager.getRoomByName(roomName);
+    if (rejoining) {
+      console.log('RejoinRoom:',socket.id, 'User:',userName, 'Room:', roomName);
     } else {
-      console.log('JoinRoom:',socket.id, 'User:',name, 'Room:',roomName);
+      console.log('JoinRoom:',socket.id, 'User:',userName, 'Room:',roomName);
     }
 
     if (!room) {
-      if (reconnecting) {
+      if (rejoining) {
         return socket.emit('connect_error', 'room-unavailable');
       }
-      roomManager.addRoom(roomName);
-      room = roomManager.getRoomByName(roomName);
-      roomManager.broadcastOpenRooms(io);
+      await roomManager.addRoom(roomName);
+      room = await roomManager.getRoomByName(roomName);
+      roomManager.broadcastOpenRooms();
     }
 
-    if (room.getStatus().dayCount === 0 || reconnecting) {
-      room.addUser(name, socket, reconnecting);
-      if (room.getStatus().dayCount === 0) { room.broadcastUsers(); };
+    const { status } = room.details;
+    if (status.dayCount === 0 || rejoining) {
+      room.addUser(userName, socket, rejoining);
     } else {
       socket.emit('connect_error', 'game-started');
     }
   };
 
-  const handleLeaveRoom = () => {
+  const handleLeaveRoom = async (message = '') => {
     const roomName = Object.keys(socket.rooms).find(room => room !== socket.id);
-    const room = roomManager.getRoomByName(roomName);
-    const user = room && room.getUsers().get(socket.id);
-    console.log('LeaveRoom:',socket.id, 'User:',user && user.name, 'Room:',roomName);
+    const room = roomName && await roomManager.getRoomByName(roomName);
+    const users = room && await room.getUsers();
+    const user = users && users.find(us => us.socketId === socket.id);
+    console.log('LeaveRoom:',socket.id, 'User:',user && user.userName, 'Room:',roomName, 'Message:', message);
 
-    if (room && room.getUsers().size > 0) {
-      if (user && room.getStatus().dayCount > 0 && !room.getStatus().gameOver) {
-        user.leaving = true;
-        roomManager.broadcastReconnectRoom(user.name, socket);
+    const status = room && room.details.status;
 
-        setTimeout(() => {
+    if (room && users.length > 0) {
+      if (user && status.dayCount > 0 && !status.gameOver) {
+        room.updateUser(socket.id, { leaving: true });
+        socket.leave(roomName)
+        roomManager.broadcastRejoinRoom(user.userName, socket);
+
+        setTimeout(async () => {
+          const user = await room.getUserBySocket(socket.id);
           if (user.leaving) {
-            room.removeUser(socket);
-            roomManager.broadcastReconnectRoom(user.name, socket);
-            console.log('Leaving Room:', roomName, 'User:',user && user.name);
+            room.removeUser(socket.id);
+            roomManager.broadcastRejoinRoom(user.userName, socket, true);
+            console.log('Leaving Room:', roomName, 'User:',user && user.userName);
             if (!user.dead) {
-              user.dead = true;
-              room.getHiddenStatus()[user.role]--;
-              room.getStatus().aliveCount--;
-              room.broadcastUsersUpdate([{ name: user.name, dead: true }]);
+              room.setHiddenStatus(false, { field: user.role, amount: -1 });
+              room.setStatus(false, { field: 'aliveCount', amount: -1 });
+              room.broadcastUsersUpdate([{ userName: user.userName, dead: true }]);
             }
-            room.setAbsentUser(user.name, user.role);
-            room.setStatus({message: `${user.name} left the game`});
+            room.setAbsentUser(socket.id, user.userName, user.role);
+            await room.setStatus({'status.message': `${user.userName} left the game`});
             room.broadcastStatus();
-            handleAction({ leaving: true });
-            roomManager.broadcastOpenRooms(io, socket);
+            handleAction({ leaving: true, roomName });
+            roomManager.broadcastOpenRooms(socket);
 
-            if (room && room.getUsers().size === 0) {
-              roomManager.removeRoom(roomName);
+            if (!users || users.length === 1) {
               console.log(roomName, 'is now closed');
-              roomManager.broadcastOpenRooms(io);
+              await roomManager.removeRoom(roomName);
+              roomManager.broadcastOpenRooms();
             }
           }
         }, 45000)
 
       } else {
-        room.removeUser(socket);
-        room.broadcastUsersUpdate([{ name: user && user.name, remove: true }]);
+        room.broadcastUsersUpdate([{ userName: user && user.userName, remove: true }]);
+        roomManager.broadcastOpenRooms(socket);
+        room.removeUser(socket.id);
 
-        socket.leave(roomName);
-        roomManager.broadcastOpenRooms(io, socket);
-
-        if (room && room.getUsers().size === 0) {
-            roomManager.removeRoom(roomName);
-            console.log(roomName, 'is now closed');
-            roomManager.broadcastOpenRooms(io);
+        if (!users || users.length === 1) {
+          console.log(roomName, 'is now closed');
+          await roomManager.removeRoom(roomName);
+          roomManager.broadcastOpenRooms();
         }
       }
 
     }
   };
       
-  const handleStartGame = () => {
+  const handleStartGame = async () => {
     const roomName = Object.keys(socket.rooms).find(room => room !== socket.id);
-    const room = roomManager.getRoomByName(roomName);
-    const users = room && room.getUsers();
-    const usersArray = Array.from(users.values());
+    const room = await roomManager.getRoomByName(roomName);
+    const users = room && await room.getUsers();
 
-    const gameRoles = shuffleArray(roles.slice(0, (users.size)));
+    const gameRoles = shuffleArray(roles.slice(0, (users.length)));
     const mafiaUsers = []
 
     // Assign roles, send roles to non-mafia, create mafia array
-    gameRoles.forEach((role, ix) => {
-      usersArray[ix].role = role;
-      room.getHiddenStatus()[role]++;
+    gameRoles.forEach(async (role, ix) => {
+      room.updateUser(users[ix].socketId, { role });
+      room.setHiddenStatus(false, {field: role, amount: 1});
       if (role !== 'mafia') {
-        room.broadcastUsersUpdate([{ name: usersArray[ix].name, role }], usersArray[ix].socket);
+        room.broadcastUsersUpdate([{ userName: users[ix].userName, role }], users[ix].socketId);
       } else {
-        mafiaUsers.push({ name: usersArray[ix].name, role })
+        mafiaUsers.push({ userName: users[ix].userName, role })
       }
       if (role === 'policeman'){
-        usersArray[ix].investigated = [];
+        users[ix].investigated = [];
       }
     });
 
     // Send all mafia users to all mafia
     gameRoles.forEach((role, ix) => {
       if (role === 'mafia') {
-        room.broadcastUsersUpdate(mafiaUsers, usersArray[ix].socket);
+        room.broadcastUsersUpdate(mafiaUsers, users[ix].socketId);
       }
     });
 
-    room.setStatus({aliveCount: users.size, dayCount: 1, nightTime: true});
+    await room.setStatus({ 'status.aliveCount': users.length, 'status.dayCount': 1, 'status.nightTime': true });
     room.broadcastStatus();
-    roomManager.broadcastOpenRooms(io);
+    roomManager.broadcastOpenRooms();
   };
   
   
-  const handleAction = ({ target, role, leaving }) => {
-    const roomName = Object.keys(socket.rooms).find(room => room !== socket.id);
-    const room = roomManager.getRoomByName(roomName);
+  const handleAction = async ({ userName, target, role, leaving, roomName }) => {
+    const actionRoomName = roomName || Object.keys(socket.rooms).find(room => room !== socket.id);
+    const room = await roomManager.getRoomByName(actionRoomName);
     
-
     if (room) {
-      const user = room.getUsers().get(socket.id);
-      const eventStamp = `${room.getStatus().dayCount}${room.getStatus().nightTime}${room.getStatus().revote.count}`
+      const eventStamp = `${room.details.status.dayCount}${room.details.status.nightTime}${room.details.status.revote.count}`;
+      room.broadcastUsersUpdate([{ userName: userName, previousEvent: eventStamp, previousTarget: target }], socket.id);
 
-      if (room.getStatus().nightTime) {
-        const actions = room.getHiddenStatus().actions;
-
+      if (room.details.status.nightTime) {
         if (!leaving) {
-          room.getHiddenStatus().actionCount++;
           switch (role) {
             case 'mafia':
-              actions.mafia[target] = actions.mafia[target] ? actions.mafia[target] + 1 : 1;
+              await room.setHiddenStatus(false, {field: `actions.mafia.${target}`, amount: 1});
               break;
             case 'policeman':
-              const targetRole = room.getUserByName(target).role;
-              user.investigated.push(target);
-              room.broadcastUsersUpdate([{ name: target, role: targetRole }], socket);
-              actions[role] = target;
+              const targetFull = await room.getUserByName(target);
+              room.broadcastUsersUpdate([{ userName: target, role: targetFull.role }], socket.id);
+              room.updateUser(socket.id, false, { field: 'investigated', value: target });
+              await room.setHiddenStatus({ [`hiddenStatus.actions.${role}`]: target });
+              break;
+            case 'doctor':
+              room.broadcastUsersUpdate([{ userName: userName, previousSaved: target }], socket.id);
+              room.updateUser(socket.id, { previousSaved: target });
+              await room.setHiddenStatus({ [`hiddenStatus.actions.${role}`]: target });
               break;
             default:
-              actions[role] = target;
+              await room.setHiddenStatus({ [`hiddenStatus.actions.${role}`]: target });
           }
-          user.previousEvent = eventStamp;
-          user.previousTarget = target;
-          room.broadcastUsersUpdate([{ name: user.name, previousEvent: eventStamp, previousTarget: target }], socket);
-          room.broadcastStatus();
+          room.updateUser(socket.id, { previousEvent: eventStamp, previousTarget: target });
         }
 
-        const { mafia, policeman, doctor } = room.getHiddenStatus();
+        const hiddenStatus = await room.getDetails(true);
+        const { mafia, policeman, doctor, actions } = hiddenStatus;
         const mafiaActionCount = Object.values(actions.mafia).reduce((a, b) => a + b, 0);
         const policemanAction = policeman > 0 ? !!actions.policeman : true;
         const doctorAction = doctor > 0 ? !!actions.doctor : true;
@@ -209,43 +212,40 @@ module.exports = function (io, socket, roomManager, userManager) {
               killUser = trgt;
             }
           })
-          if (room.getHiddenStatus().mafia > 1 && actions.mafia[killUser] < 2) {
+          if (mafia > 1 && actions.mafia[killUser] < 2) {
             killUser = undefined;
-            room.setStatus({ message: 'Mafia could not agree on who to kill' });
+            room.setStatus({ 'status.message': 'Mafia could not agree on who to kill' });
           } else if (actions.doctor && actions.doctor === killUser) {
-            room.setStatus({ message: `${killUser} was saved by the doctor` });
+            room.setStatus({ 'status.message': `${killUser} was saved by the doctor` });
             killUser = undefined;
           } else {
-            const killUserFull = room.getUserByName(killUser);
+            const killUserFull = await room.getUserByName(killUser);
 
             if (killUserFull) {
-              killUserFull.dead = true;
-              room.getHiddenStatus()[killUserFull.role]--;
-              room.getStatus().aliveCount--;
-              room.broadcastUsersUpdate([{ name: killUser, dead: true }]);
+              room.updateUser(killUserFull.socketId, { dead: true });
+              room.setStatus(false, {field: 'aliveCount', amount: -1});
+              room.broadcastUsersUpdate([{ userName: killUser, dead: true }]);
+              await room.setHiddenStatus(false, {field: killUserFull.role, amount: -1});
             };
 
-            room.setStatus({ message: `${killUser} was killed by the mafia` });
+            room.setStatus({ 'status.message': `${killUser} was killed by the mafia` });
           }
           
-          room.getStatus().dayCount++;
-          room.setStatus({ nightTime: false })
-          room.setHiddenStatus({ actionCount: 0, actions: { mafia: {} }});
+          room.setStatus({ 'status.nightTime': false }, { field: 'dayCount', amount: 1 });
+          room.setHiddenStatus({ 'hiddenStatus.actions': { mafia: {} }});
         }
 
-      } else if (!room.getStatus().nightTime) {
-        const votes = room.getStatus().votes;
-
+      } else if (!room.details.status.nightTime) {
         if (!leaving) {
-          votes[target] = votes[target] ? votes[target] + 1 : 1;
-          user.previousEvent = eventStamp;
-          user.previousTarget = target;
-          room.broadcastUsersUpdate([{ name: user.name, previousEvent: eventStamp, previousTarget: target }], socket);
+          room.updateUser(socket.id, { previousEvent: eventStamp });
+          await room.setStatus(false, {field: `votes.${target}`, amount: 1});
           room.broadcastStatus();
         }
-        
+
+        const status = await room.getDetails();
+        const { votes, aliveCount } = status;
         const voteCount = votes ? Object.values(votes).reduce((a, b) => a + b, 0) : 0;
-        if (voteCount === room.getStatus().aliveCount) {
+        if (voteCount >= aliveCount) {
           let maxNumberOfVotes = undefined;
           Object.keys(votes).forEach(target => {
             const numberOfVotesForTarget = votes[target];
@@ -257,44 +257,43 @@ module.exports = function (io, socket, roomManager, userManager) {
           const targetsWithMaxNumberOfVotes = Object.keys(votes).filter(target => votes[target] === maxNumberOfVotes);
           if (targetsWithMaxNumberOfVotes.length > 1) {
             room.setStatus({
-              message: `Vote was a tie between ${targetsWithMaxNumberOfVotes.join(' and ')} - revote between them`,
-              votes: {},
-              revote: {
-                count: room.getStatus().revote.count + 1,
+              'status.message': `Vote was a tie between ${targetsWithMaxNumberOfVotes.join(' and ')} - revote between them`,
+              'status.votes': {},
+              'status.revote': {
                 users: targetsWithMaxNumberOfVotes
               },
-            });
+            }, { field: 'revote.count', amount: 1 });
           } else {
-            const killUser = room.getUserByName(targetsWithMaxNumberOfVotes[0]);
+            const killUser = await room.getUserByName(targetsWithMaxNumberOfVotes[0]);
             if (killUser) {
-              killUser.dead = true;
-              room.getHiddenStatus()[killUser.role]--;
-              room.getStatus().aliveCount--;
+              room.updateUser(killUser.socketId, { dead: true });
+              room.setStatus(false, {field: 'aliveCount', amount: -1});
+              await room.setHiddenStatus(false, {field: killUser.role, amount: -1});
             }
 
-            room.setStatus({
-              message: `${targetsWithMaxNumberOfVotes[0]} was lynched by the village`,
-              nightTime: true,
-              votes: {},
-              revote: {
+            await room.setStatus({
+              'status.message': `${targetsWithMaxNumberOfVotes[0]} was lynched by the village`,
+              'status.nightTime': true,
+              'status.votes': {},
+              'status.revote': {
                 count: 0,
                 users: [],
               }
             })
 
-            room.broadcastUsersUpdate([{ name: targetsWithMaxNumberOfVotes[0], dead: true }]);
+            room.broadcastUsersUpdate([{ userName: targetsWithMaxNumberOfVotes[0], dead: true }]);
           }
         }
       }
     
-      const { mafia, villager, policeman, doctor } = room.getHiddenStatus();
+      const { mafia, villager, policeman, doctor } = await room.getDetails(true);
 
       if (mafia === 0){
-        room.setStatus({ message: 'Villagers win!', gameOver: true });
-        room.broadcastUsers(roles, undefined, true);
+        room.broadcastUsers(true, undefined, true);
+        await room.setStatus({ 'status.message': 'Villagers win!', 'status.gameOver': true });
       } else if (mafia > 0 && (villager + policeman + doctor < 2) ) {
-        room.setStatus({ message: 'Mafia win!', gameOver: true });
-        room.broadcastUsers(roles, undefined, true);
+        room.broadcastUsers(true, undefined, true);
+        await room.setStatus({ 'status.message': 'Mafia win!', 'status.gameOver': true });
       }
       
       room.broadcastStatus();
