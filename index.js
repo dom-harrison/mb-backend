@@ -5,7 +5,7 @@ var io = require('socket.io')(http, {
 });
 const PORT = process.env.PORT || 4000;
 const ENV = process.env.ENV || 'development';
-console.log(ENV);
+console.log('Environment: ' + ENV);
 
 const admin = require('firebase-admin');
 let serviceAccount;
