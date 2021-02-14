@@ -219,7 +219,7 @@ module.exports = function (socket, roomManager, userManager) {
             room.setStatus({ 'status.message': `${killUser} was saved by the doctor` });
             killUser = undefined;
           } else {
-            const killUserFull = await room.getUserByName(killUser);
+            const killUserFull = killUser && await room.getUserByName(killUser);
 
             if (killUserFull) {
               room.updateUser(killUserFull.socketId, { dead: true });
