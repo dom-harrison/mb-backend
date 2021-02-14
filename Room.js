@@ -96,7 +96,7 @@ module.exports = function (roomName, details, db, io) {
       if (doc.exists) {
         details = doc.data();
       }
-      return hidden ? details.hiddenStatus : details.status;
+      return hidden ? details && details.hiddenStatus : details && details.status;
     }
 
     const setStatus = async (changes, increment) => {

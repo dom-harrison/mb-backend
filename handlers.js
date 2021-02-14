@@ -204,6 +204,7 @@ module.exports = function (socket, roomManager, userManager) {
         const mafiaActionCount = Object.values(actions.mafia).reduce((a, b) => a + b, 0);
         const policemanAction = policeman > 0 ? !!actions.policeman : true;
         const doctorAction = doctor > 0 ? !!actions.doctor : true;
+        console.log (`MAC: ${mafiaActionCount}, mafia: ${mafia}, police: ${policemanAction}, doctor:${doctorAction}`);
         
         if (mafiaActionCount >= mafia && policemanAction && doctorAction) {
           let killUser = undefined;
