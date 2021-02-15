@@ -15,7 +15,7 @@ module.exports = function (socket, roomManager, userManager) {
     roomManager.broadcastOpenRooms(socket);
   };
 
-  const handleLogin = async ({ userName, userId, reconnect }) => {
+  const handleLogin = async ({ userName, userId, reconnect, newName }) => {
     console.log('Login:', socket.id, 'Name:', userName );
     let loginId = userId;
     const user = await userManager.getUserByName(userName);
@@ -34,11 +34,14 @@ module.exports = function (socket, roomManager, userManager) {
       }
     }
 
-    if (!reconnect) {
+    if (newName) {
       socket.emit('login_response', { userName, userId: loginId });
     }
+
+    if (!reconnect) {
+      roomManager.broadcastRejoinRoom(userName, socket);
+    }
     
-    roomManager.broadcastRejoinRoom(userName, socket);
   }
 
   const handleLogout = async (message) => {
