@@ -102,13 +102,15 @@ module.exports = function (socket, roomManager, userManager) {
             room.removeUser(socket.id);
             roomManager.broadcastRejoinRoom(user.userName, socket, true);
             console.log('Leaving Room:', roomName, 'User:',user && user.userName);
+
+            let statusIncrement = false;
             if (!user.dead) {
               room.setHiddenStatus(false, { field: user.role, amount: -1 });
-              room.setStatus(false, { field: 'aliveCount', amount: -1 });
+              statusIncrement = { field: 'aliveCount', amount: -1 };
               room.broadcastUsersUpdate([{ userName: user.userName, dead: true }]);
             }
             room.setAbsentUser(socket.id, user.userName, user.role);
-            await room.setStatus({'status.message': `${user.userName} left the game`});
+            await room.setStatus({'status.message': `${user.userName} left the game`}, statusIncrement);
             room.broadcastStatus();
             handleAction({ leaving: true, roomName });
             roomManager.broadcastOpenRooms(socket);

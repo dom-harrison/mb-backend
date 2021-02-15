@@ -101,19 +101,19 @@ module.exports = function (roomName, details, db, io) {
 
     const setStatus = async (changes, increment) => {
       if (changes) {
-        return await MB_ROOM.update(changes);
+        await MB_ROOM.update(changes);
       }
       if (increment) {
-        return await MB_ROOM.update({ [`status.${increment.field}`]: admin.firestore.FieldValue.increment(increment.amount) });
+        await MB_ROOM.update({ [`status.${increment.field}`]: admin.firestore.FieldValue.increment(increment.amount) });
       }
     }
 
     const setHiddenStatus = async (changes, increment) => {
       if (changes) {
-        return await MB_ROOM.update(changes);
+        await MB_ROOM.update(changes);
       }
       if (increment) {
-        return await MB_ROOM.update({ [`hiddenStatus.${increment.field}`]: admin.firestore.FieldValue.increment(increment.amount) });
+        await MB_ROOM.update({ [`hiddenStatus.${increment.field}`]: admin.firestore.FieldValue.increment(increment.amount) });
       } 
     }
 
