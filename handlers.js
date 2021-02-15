@@ -210,6 +210,7 @@ module.exports = function (socket, roomManager, userManager) {
         console.log (`MAC: ${mafiaActionCount}, mafia: ${mafia}, police: ${policemanAction}, doctor:${doctorAction}`);
         
         if (mafiaActionCount >= mafia && policemanAction && doctorAction) {
+          let message;
           let killUser = undefined;
           Object.keys(actions.mafia).forEach(trgt => {
             if (!killUser || actions.mafia[trgt] > actions.mafia[killUser]) {
@@ -218,9 +219,9 @@ module.exports = function (socket, roomManager, userManager) {
           })
           if (mafia > 1 && actions.mafia[killUser] < 2) {
             killUser = undefined;
-            room.setStatus({ 'status.message': 'Mafia could not agree on who to kill' });
+            message = 'Mafia could not agree on who to kill';
           } else if (actions.doctor && actions.doctor === killUser) {
-            room.setStatus({ 'status.message': `${killUser} was saved by the doctor` });
+            message = `${killUser} was saved by the doctor`;
             killUser = undefined;
           } else {
             const killUserFull = killUser && await room.getUserByName(killUser);
@@ -232,11 +233,11 @@ module.exports = function (socket, roomManager, userManager) {
               await room.setHiddenStatus(false, {field: killUserFull.role, amount: -1});
             };
 
-            room.setStatus({ 'status.message': `${killUser} was killed by the mafia` });
+            message = `${killUser} was killed by the mafia`;
           }
           
-          room.setStatus({ 'status.nightTime': false }, { field: 'dayCount', amount: 1 });
-          room.setHiddenStatus({ 'hiddenStatus.actions': { mafia: {} }});
+          await room.setStatus({ 'status.nightTime': false, 'status.message': message }, { field: 'dayCount', amount: 1 });
+          await room.setHiddenStatus({ 'hiddenStatus.actions': { mafia: {} }});
         }
 
       } else if (!room.details.status.nightTime) {
@@ -260,7 +261,7 @@ module.exports = function (socket, roomManager, userManager) {
 
           const targetsWithMaxNumberOfVotes = Object.keys(votes).filter(target => votes[target] === maxNumberOfVotes);
           if (targetsWithMaxNumberOfVotes.length > 1) {
-            room.setStatus({
+            await room.setStatus({
               'status.message': `Vote was a tie between ${targetsWithMaxNumberOfVotes.join(' and ')} - revote between them`,
               'status.votes': {},
               'status.revote': {
@@ -271,7 +272,7 @@ module.exports = function (socket, roomManager, userManager) {
             const killUser = await room.getUserByName(targetsWithMaxNumberOfVotes[0]);
             if (killUser) {
               room.updateUser(killUser.socketId, { dead: true });
-              room.setStatus(false, {field: 'aliveCount', amount: -1});
+              await room.setStatus(false, {field: 'aliveCount', amount: -1});
               await room.setHiddenStatus(false, {field: killUser.role, amount: -1});
             }
 
