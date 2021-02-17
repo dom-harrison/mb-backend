@@ -57,13 +57,14 @@ module.exports = function (socket, roomManager, userManager) {
   }
 
   const handleJoinRoom = async ({ userName, roomName, rejoining }) => {
-    let room = await roomManager.getRoomByName(roomName);
+    let room =  await roomManager.getRoomByName(roomName);
     if (rejoining) {
       console.log('RejoinRoom:',socket.id, 'User:',userName, 'Room:', roomName);
     } else {
       console.log('JoinRoom:',socket.id, 'User:',userName, 'Room:',roomName);
     }
 
+    let newRoom = false;
     if (!room) {
       if (rejoining) {
         return socket.emit('connect_error', 'room-unavailable');
@@ -71,11 +72,12 @@ module.exports = function (socket, roomManager, userManager) {
       await roomManager.addRoom(roomName);
       room = await roomManager.getRoomByName(roomName);
       roomManager.broadcastOpenRooms();
+      newRoom = true;
     }
 
     const { status } = room.details;
     if (status.dayCount === 0 || rejoining) {
-      room.addUser(userName, socket, rejoining);
+      room.addUser(userName, socket, rejoining, newRoom);
     } else {
       socket.emit('connect_error', 'game-started');
     }
@@ -132,6 +134,10 @@ module.exports = function (socket, roomManager, userManager) {
           console.log(roomName, 'is now closed');
           await roomManager.removeRoom(roomName);
           roomManager.broadcastOpenRooms();
+        } else if (user.host) {
+          const newHost = users && users.find(us => us.socketId !== socket.id);
+          room.updateUser(newHost.socketId, { host: true });
+          room.broadcastUsersUpdate([{ userName: newHost.userName, host: true }]);
         }
       }
 

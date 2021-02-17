@@ -5,14 +5,14 @@ module.exports = function (roomName, details, db, io) {
   const MB_ROOM_USERS = MB_ROOM.collection('roomUsers');
   const MB_ABSENT_USERS = MB_ROOM.collection('absentUsers');
 
-    const addUser = async (userName, socket, rejoining) => {
+    const addUser = async (userName, socket, rejoining, newRoom) => {
       const { status } = details;
       socket.emit('room_status', status);
 
       if (!rejoining) {
         socket.join(roomName);
-        broadcastUsersUpdate([{userName}]);
-        await MB_ROOM_USERS.doc(socket.id).set({ userName, socketId: socket.id });
+        broadcastUsersUpdate([{ userName, host: newRoom }]);
+        await MB_ROOM_USERS.doc(socket.id).set({ userName, socketId: socket.id, host: newRoom });
         broadcastUsers(false);
       } else {
         const existingUser = await getUserByName(userName);
@@ -26,7 +26,7 @@ module.exports = function (roomName, details, db, io) {
           }
           socket.join(roomName);
           const currentUserDetails = [{ ...existingUser, socket: undefined, leaving: false }];
-        broadcastUsers(false, socket);
+          broadcastUsers(false, socket);
           broadcastUsersUpdate(currentUserDetails, socket.id);
   
           if (existingUser.role === 'mafia') {
@@ -129,7 +129,7 @@ module.exports = function (roomName, details, db, io) {
           userName: u.userName, 
           role: roles ? u.role : undefined, 
           dead: u.dead || false,
-          host: index === 0,
+          host: u.host,
         }) 
       });
       if (socket) {
