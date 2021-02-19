@@ -250,7 +250,7 @@ module.exports = function (socket, roomManager, userManager) {
 
       } else if (!room.details.status.nightTime) {
         if (!leaving) {
-          room.updateUser(socket.id, { previousEvent: eventStamp });
+          room.updateUser(socket.id, { previousEvent: eventStamp, previousTarget: target });
           await room.setStatus(false, {field: `votes.${target}`, amount: 1});
           room.broadcastStatus();
         }
@@ -272,9 +272,7 @@ module.exports = function (socket, roomManager, userManager) {
             await room.setStatus({
               'status.message': `Vote was a tie between ${targetsWithMaxNumberOfVotes.join(' and ')} - revote between them`,
               'status.votes': {},
-              'status.revote': {
-                users: targetsWithMaxNumberOfVotes
-              },
+              'status.revote.users': targetsWithMaxNumberOfVotes
             }, { field: 'revote.count', amount: 1 });
           } else {
             const killUser = await room.getUserByName(targetsWithMaxNumberOfVotes[0]);
